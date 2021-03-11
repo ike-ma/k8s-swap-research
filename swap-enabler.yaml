@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: swap-enabler
+  namespace: default
+  labels:
+    k8s-app: swap-enabler
+spec:
+  selector:
+    matchLabels:
+      name: swap-enabler
+  template:
+    metadata:
+      labels:
+        name: swap-enabler
+    spec:
+      hostPID: true
+      containers:
+        - name: startup-script
+          image: gcr.io/google-containers/startup-script:v1
+          imagePullPolicy: Always
+          securityContext:
+            privileged: true
+          env:
+          - name: STARTUP_SCRIPT
+            value: |
+              set -o errexit
+              set -o pipefail
+              set -o nounset
+
+              echo Before enabling swap on node
+              free -h
+
+              echo Enabling swap on node
+              # 1. Allocate 1G swapfile and enable swap on node
+              fallocate -l 1G /swapfile || true
+              chmod 600 /swapfile
+              mkswap /swapfile
+              swapon /swapfile
+
+              #2. Permanently add swapfile entry
+              echo "/swapfile swap swap defaults 0 0" | tee -a /etc/fstab
+
+              echo After enabling swap on node
+              swapon --show
+              free -h
+
+              #3. Disable check for swap on kubelet
+              sed -i "s:--v=2:--v=2 --fail-swap-on=false:g" /etc/default/kubelet
+              echo "Restarting kubelet..."
+              systemctl restart kubelet
+
